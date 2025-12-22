@@ -7,3 +7,5 @@ joblib
 torch
 clip-anytorch
 python-multipart
+kagglehub
+python-dotenv

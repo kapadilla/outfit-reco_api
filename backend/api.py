@@ -1,110 +1,96 @@
-# backend/api.py
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+"""
+Outfit Recommender API - Main Application Entry Point
+
+A Style & Occasion-Based Outfit Recommendation System using CLIP embeddings
+and machine learning classification for personalized fashion suggestions.
+"""
+
+import logging
+import os
+import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+# Add backend directory to path for imports
+backend_dir = Path(__file__).parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import os
-import numpy as np
-import pandas as pd
-import joblib
-import clip
-import torch
-from sklearn.metrics.pairwise import cosine_similarity
 
-MODEL_DIR = os.environ.get('MODEL_DIR', '../model')
-DATA_DIR = os.environ.get('DATA_DIR', '../data')
-IMAGES_DIR = os.path.join(DATA_DIR, 'images')
+from config import settings
+from services import ml_service
+from routes import health_router, recommendations_router
 
-# Load artifacts
-print('Loading artifacts...')
-clf = joblib.load(os.path.join(MODEL_DIR, 'usage_classifier.joblib'))
-le = joblib.load(os.path.join(MODEL_DIR, 'label_encoder.joblib'))
-image_embeddings = np.load(os.path.join(MODEL_DIR, 'image_embeddings.npy'))
-image_ids = pd.read_csv(os.path.join(MODEL_DIR, 'image_ids.csv'))['id'].tolist()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-styles_df = pd.read_csv(os.path.join(DATA_DIR, 'styles.csv'), on_bad_lines='skip')
-styles_df['id'] = styles_df['id'].astype(int)
-styles_df = styles_df.set_index('id')
 
-# CLIP model for text encoding
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-model, preprocess = clip.load('ViT-B/32', device=device)
-model.eval()
-print('Artifacts loaded. Device:', device)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan manager for startup and shutdown events.
+    Loads ML models on startup and performs cleanup on shutdown.
+    """
+    # Startup: Load ML models
+    logger.info("Starting Outfit Recommender API...")
+    try:
+        ml_service.load_models()
+        logger.info("✓ API startup complete")
+    except Exception as e:
+        logger.error(f"Failed to load models on startup: {e}")
+        logger.warning(
+            "API will start but recommendations will not work until models are loaded"
+        )
 
-app = FastAPI(title='Outfit Recommender API')
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=['*'],
-    allow_methods=['*'],
-    allow_headers=['*']
+    yield
+
+    # Shutdown: Cleanup
+    logger.info("Shutting down API...")
+
+
+# Initialize FastAPI application
+app = FastAPI(
+    title=settings.API_TITLE,
+    description=settings.API_DESCRIPTION,
+    version=settings.API_VERSION,
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
-# Mount static images
-if os.path.exists(IMAGES_DIR):
-    app.mount('/images', StaticFiles(directory=IMAGES_DIR), name='images')
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_methods=settings.CORS_METHODS,
+    allow_headers=settings.CORS_HEADERS,
+)
+
+# Mount static files for product images
+if settings.IMAGES_DIR.exists():
+    app.mount("/images", StaticFiles(directory=str(settings.IMAGES_DIR)), name="images")
+    logger.info(f"✓ Mounted static images directory: {settings.IMAGES_DIR}")
+else:
+    logger.warning(f"Images directory not found: {settings.IMAGES_DIR}")
+
+# Include API routes
+app.include_router(health_router)
+app.include_router(recommendations_router)
 
 
-@app.get('/recommend')
-def recommend(q: str):
-    """Recommend items for a text query."""
-
-    try:
-        # Encode text
-        tokens = clip.tokenize([q]).to(device)
-        with torch.no_grad():
-            text_emb = model.encode_text(tokens).cpu().numpy()[0]
-            text_emb = text_emb / (np.linalg.norm(text_emb) + 1e-10)
-
-        # Predict usage
-        try:
-            usage_pred = clf.predict(text_emb.reshape(1, -1))[0]
-            usage_label = le.inverse_transform([usage_pred])[0]
-        except Exception:
-            usage_label = None
-
-        # Filter candidates by usage
-        candidates_idx = list(range(len(image_ids)))
-        if usage_label is not None:
-            candidates_idx = [
-                i for i, pid in enumerate(image_ids)
-                if str(styles_df.loc[pid].get('usage', '')).strip().title()
-                == str(usage_label).strip().title()
-            ]
-
-        # Fallback if nothing matches
-        if len(candidates_idx) == 0:
-            candidates_idx = list(range(len(image_ids)))
-
-        # Compute similarities
-        candidates_emb = image_embeddings[candidates_idx]
-        sims = cosine_similarity(text_emb.reshape(1, -1), candidates_emb)[0]
-
-        top_k = min(12, len(sims))
-        top_idx_local = sims.argsort()[-top_k:][::-1]
-
-        # Prepare results
-        results = []
-        for local_idx in top_idx_local:
-            global_idx = candidates_idx[local_idx]
-            pid = int(image_ids[global_idx])
-
-            meta = styles_df.loc[pid].to_dict() if pid in styles_df.index else {}
-
-            results.append({
-                'id': pid,
-                'product': meta.get('productDisplayName', ''),
-                'color': meta.get('baseColor', ''),
-                'usage': meta.get('usage', ''),
-                'score': float(sims[local_idx])
-            })
-
-        return JSONResponse({'query': q, 'results': results})
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get('/health')
-def health():
-    return {'status': 'ok'}
+@app.get("/", tags=["Root"])
+async def root():
+    """Root endpoint with API information."""
+    return {
+        "message": "Welcome to the Outfit Recommender API",
+        "version": settings.API_VERSION,
+        "docs": "/docs",
+        "health": "/health",
+        "recommend": "/recommend?q=your+query+here",
+    }
