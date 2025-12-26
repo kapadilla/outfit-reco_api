@@ -50,6 +50,11 @@ class RecommendationService:
         usage_label = self.ml_service.predict_usage(text_emb)
         logger.info(f"Predicted usage: {usage_label}")
 
+        # Sanitize usage label for display (convert Nan to General)
+        display_usage = usage_label
+        if usage_label is None or str(usage_label).lower() in ["nan", "none", ""]:
+            display_usage = "General"
+
         # Filter candidates by usage category
         candidates_idx = self._filter_by_usage(usage_label)
 
@@ -58,10 +63,11 @@ class RecommendationService:
 
         return {
             "query": query,
-            "predicted_usage": usage_label,
+            "predicted_usage": display_usage,
             "results": results,
             "total_results": len(results),
         }
+
 
     def _filter_by_usage(self, usage_label: Optional[str]) -> List[int]:
         """
@@ -123,6 +129,18 @@ class RecommendationService:
         top_k = min(top_k, len(sims))
         top_idx_local = sims.argsort()[-top_k:][::-1]
 
+        # Helper to safely get string value from metadata
+        def get_safe_str(val):
+            if val is None:
+                return ""
+            # Check for NaN (pandas often uses float nan for missing values)
+            try:
+                if np.isnan(val):
+                    return ""
+            except TypeError:
+                pass  # not a number
+            return str(val)
+
         # Build results
         results = []
         for local_idx in top_idx_local:
@@ -135,9 +153,9 @@ class RecommendationService:
             results.append(
                 ProductItem(
                     id=product_id,
-                    product=meta.get("productDisplayName", ""),
-                    color=meta.get("baseColour", ""),
-                    usage=meta.get("usage", ""),
+                    product=get_safe_str(meta.get("productDisplayName", "")),
+                    color=get_safe_str(meta.get("baseColour", "")),
+                    usage=get_safe_str(meta.get("usage", "")),
                     score=float(sims[local_idx]),
                     image_url=f"/images/{product_id}.jpg",
                 )

@@ -4,7 +4,10 @@ Model Training Script for Outfit Recommender
 This script retrains the ML models using the full dataset:
 1. Computes CLIP image embeddings for all products
 2. Trains a Logistic Regression classifier to predict usage categories
-3. Saves all model artifacts
+3. Applies class balancing techniques to handle imbalanced data:
+   - SMOTE oversampling to create synthetic minority class samples
+   - class_weight='balanced' in Logistic Regression
+4. Saves all model artifacts
 
 Usage:
     python scripts/train_models.py [--sample-size N] [--batch-size B]
@@ -13,6 +16,10 @@ Options:
     --sample-size N    Limit to N images (default: all images)
     --batch-size B     Process B images at a time (default: 32)
     --force            Overwrite existing embeddings
+    --no-smote         Disable SMOTE oversampling (use class weights only)
+
+Requirements:
+    pip install imbalanced-learn  (for SMOTE support)
 """
 
 import os
@@ -58,6 +65,11 @@ def parse_args():
         "--force",
         action="store_true",
         help="Overwrite existing embeddings",
+    )
+    parser.add_argument(
+        "--no-smote",
+        action="store_true",
+        help="Disable SMOTE oversampling (use class weights only)",
     )
     return parser.parse_args()
 
@@ -220,15 +232,22 @@ def compute_embeddings(styles, batch_size=32, force=False):
     return image_embeddings, image_ids
 
 
-def train_classifier(styles, image_embeddings, image_ids):
-    """Train usage classifier on the embeddings."""
+def train_classifier(styles, image_embeddings, image_ids, use_smote=True):
+    """Train usage classifier on the embeddings with class balancing.
+    
+    Args:
+        styles: DataFrame with product metadata
+        image_embeddings: CLIP embeddings for images
+        image_ids: List of product IDs
+        use_smote: If True, apply SMOTE oversampling for minority classes
+    """
     from sklearn.preprocessing import LabelEncoder
     from sklearn.model_selection import train_test_split
     from sklearn.linear_model import LogisticRegression
-    from sklearn.metrics import accuracy_score, classification_report
+    from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
     import joblib
 
-    print("\n🎯 Training usage classifier...")
+    print("\n🎯 Training usage classifier (with class balancing)...")
 
     # Build y labels aligned to image_ids
     styles_indexed = styles.set_index("id")
@@ -263,10 +282,10 @@ def train_classifier(styles, image_embeddings, image_ids):
     le = LabelEncoder()
     y_enc = le.fit_transform(y)
 
-    # Print class distribution
-    print("\n   Class distribution:")
+    # Print class distribution (before balancing)
+    print("\n   Class distribution (before balancing):")
     for cls, count in usage_counts.head(10).items():
-        print(f"     - {cls}: {count}")
+        print(f"     - {cls}: {count} ({count/len(y)*100:.1f}%)")
     if len(usage_counts) > 10:
         print(f"     ... and {len(usage_counts) - 10} more categories")
 
@@ -278,9 +297,54 @@ def train_classifier(styles, image_embeddings, image_ids):
     print(f"\n   Train set: {len(X_train)} samples")
     print(f"   Test set: {len(X_test)} samples")
 
-    # Train classifier
-    clf = LogisticRegression(max_iter=2000, n_jobs=-1, verbose=0)
-    print("\n   Training Logistic Regression...")
+    # Apply SMOTE oversampling if requested
+    if use_smote:
+        try:
+            from imblearn.over_sampling import SMOTE
+            
+            print("\n   Applying SMOTE oversampling...")
+            
+            # Determine minimum samples per class for SMOTE
+            unique, counts = np.unique(y_train, return_counts=True)
+            min_count = min(counts)
+            
+            # SMOTE needs at least k_neighbors+1 samples per class (default k=5)
+            k_neighbors = min(5, min_count - 1) if min_count > 1 else 1
+            
+            if k_neighbors >= 1:
+                smote = SMOTE(random_state=42, k_neighbors=k_neighbors)
+                X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
+                
+                print(f"   Before SMOTE: {len(X_train)} samples")
+                print(f"   After SMOTE:  {len(X_train_balanced)} samples")
+                
+                # Show new distribution
+                unique_new, counts_new = np.unique(y_train_balanced, return_counts=True)
+                print("\n   Class distribution (after SMOTE):")
+                for cls_idx, count in zip(unique_new, counts_new):
+                    cls_name = le.classes_[cls_idx]
+                    print(f"     - {cls_name}: {count}")
+                
+                X_train = X_train_balanced
+                y_train = y_train_balanced
+            else:
+                print("   ⚠ Not enough samples for SMOTE, skipping...")
+                
+        except ImportError:
+            print("   ⚠ imbalanced-learn not installed, skipping SMOTE.")
+            print("   Install with: pip install imbalanced-learn")
+            print("   Proceeding with class_weight='balanced' only...")
+
+    # Train classifier with balanced class weights
+    # class_weight='balanced' automatically adjusts weights inversely proportional to class frequencies
+    clf = LogisticRegression(
+        max_iter=2000, 
+        n_jobs=-1, 
+        verbose=0, 
+        random_state=42,
+        class_weight='balanced'  # Key change: penalizes minority class misclassification more
+    )
+    print("\n   Training Logistic Regression with class_weight='balanced'...")
 
     start_time = time.time()
     clf.fit(X_train, y_train)
@@ -299,6 +363,12 @@ def train_classifier(styles, image_embeddings, image_ids):
     )
     for line in report.split("\n"):
         print(f"   {line}")
+
+    # Confusion matrix
+    print("\n   Confusion Matrix:")
+    cm = confusion_matrix(y_test, y_pred)
+    print(f"   Classes: {le.classes_}")
+    print(cm)
 
     # Save artifacts
     clf_path = MODEL_DIR / "usage_classifier.joblib"
@@ -338,8 +408,9 @@ def main():
         styles, batch_size=args.batch_size, force=args.force
     )
 
-    # Train classifier
-    clf, le = train_classifier(styles, image_embeddings, image_ids)
+    # Train classifier (with class balancing)
+    use_smote = not args.no_smote
+    clf, le = train_classifier(styles, image_embeddings, image_ids, use_smote=use_smote)
 
     # Summary
     print("\n" + "=" * 60)

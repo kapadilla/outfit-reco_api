@@ -9,3 +9,4 @@ clip-anytorch
 python-multipart
 kagglehub
 python-dotenv
+imbalanced-learn
