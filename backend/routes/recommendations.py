@@ -17,11 +17,15 @@ router = APIRouter(tags=["Recommendations"])
     response_model=RecommendationResponse,
     summary="Get Outfit Recommendations",
     description="""
-    Get personalized outfit recommendations based on a text query.
+    Get personalized outfit recommendations based on a text query with pagination support.
     
     The system uses CLIP embeddings to understand your query and matches it with 
     fashion products from our catalog. It predicts the usage category (e.g., Casual, 
     Formal) and returns the most similar items ranked by relevance.
+    
+    **Pagination:**
+    - Use `page` and `limit` to paginate through results
+    - Response includes `total_matching` (total products) and `total_pages`
     
     **Example queries:**
     - "casual blue jeans for summer"
@@ -37,29 +41,49 @@ async def get_recommendations(
         min_length=1,
         example="casual blue jeans",
     ),
+    page: int = Query(
+        default=1,
+        description="Page number (1-indexed)",
+        ge=1,
+    ),
+    limit: int = Query(
+        default=12,
+        description="Number of items per page",
+        ge=1,
+        le=50,
+    ),
     top_k: Optional[int] = Query(
         default=None,
-        description=f"Number of recommendations to return (default: {settings.TOP_K_RESULTS})",
+        description="[DEPRECATED] Use 'limit' instead. If provided, overrides 'limit' for backward compatibility.",
         ge=1,
         le=50,
     ),
 ) -> RecommendationResponse:
     """
-    Retrieve outfit recommendations for a given text query.
+    Retrieve outfit recommendations for a given text query with pagination.
 
     Args:
         q: Text description of desired outfit or occasion
-        top_k: Optional number of results to return (1-50)
+        page: Page number (1-indexed, default=1)
+        limit: Number of items per page (1-50, default=12)
+        top_k: [DEPRECATED] Use 'limit' instead
 
     Returns:
-        RecommendationResponse with ranked product recommendations
+        RecommendationResponse with ranked product recommendations and pagination info
 
     Raises:
         HTTPException: If an error occurs during recommendation generation
     """
     try:
-        # Get recommendations from service
-        result = recommendation_service.get_recommendations(query=q, top_k=top_k)
+        # Handle backward compatibility: top_k overrides limit if provided
+        effective_limit = top_k if top_k is not None else limit
+        
+        # Get recommendations from service with pagination
+        result = recommendation_service.get_recommendations(
+            query=q, 
+            page=page, 
+            limit=effective_limit
+        )
 
         return RecommendationResponse(**result)
 
@@ -70,3 +94,4 @@ async def get_recommendations(
             status_code=500,
             detail=f"An error occurred while processing your request: {str(e)}",
         )
+

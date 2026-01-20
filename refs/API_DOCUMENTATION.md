@@ -220,10 +220,12 @@ Main recommendation endpoint that returns personalized outfit suggestions based 
 
 **Parameters:**
 
-| Parameter | Type    | Required | Default | Constraints    | Description                                        |
-| --------- | ------- | -------- | ------- | -------------- | -------------------------------------------------- |
-| `q`       | string  | Yes      | -       | min_length=1   | Search query describing desired outfit or occasion |
-| `top_k`   | integer | No       | 12      | 1 ≤ value ≤ 50 | Number of recommendations to return                |
+| Parameter | Type    | Required | Default | Constraints    | Description                                                  |
+| --------- | ------- | -------- | ------- | -------------- | ------------------------------------------------------------ |
+| `q`       | string  | Yes      | -       | min_length=1   | Search query describing desired outfit or occasion           |
+| `page`    | integer | No       | 1       | ≥ 1            | Page number (1-indexed)                                      |
+| `limit`   | integer | No       | 12      | 1 ≤ value ≤ 50 | Number of items per page                                     |
+| `top_k`   | integer | No       | -       | 1 ≤ value ≤ 50 | **[DEPRECATED]** Use `limit` instead. Overrides `limit` if provided. |
 
 **Query Parameter Details:**
 
@@ -233,12 +235,17 @@ Main recommendation endpoint that returns personalized outfit suggestions based 
 - Can include: style, color, occasion, usage, season, etc.
 - Examples: "casual blue jeans", "formal business attire", "summer party dress"
 
-**`top_k` (Top K Results):**
+**`page` (Page Number):**
 
-- Controls how many recommendations are returned
-- Higher values return more results
-- Lower values for more focused recommendations
+- Controls which page of results to return
+- 1-indexed (first page is 1)
+- If page exceeds total pages, returns the last available page
+
+**`limit` (Items Per Page):**
+
+- Controls how many recommendations are returned per page
 - Default: 12 items
+- Maximum: 50 items
 
 **Request Headers:**  
 None required
@@ -282,7 +289,11 @@ None required
 | `query`           | string       | Original search query from the request                       |
 | `predicted_usage` | string\|null | Predicted usage category (e.g., Casual, Formal, Sports)      |
 | `results`         | array        | List of recommended products (see Product Item schema below) |
-| `total_results`   | integer      | Number of results returned                                   |
+| `total_results`   | integer      | Number of results in current page                            |
+| `page`            | integer      | Current page number                                          |
+| `limit`           | integer      | Items per page                                               |
+| `total_matching`  | integer      | Total matching products before pagination                    |
+| `total_pages`     | integer      | Total number of pages available                              |
 
 **Product Item Schema:**
 
@@ -297,13 +308,19 @@ None required
 
 **Example Requests:**
 
-**Basic Query:**
+**Basic Query (Default Pagination):**
 
 ```bash
 curl "http://localhost:8000/recommend?q=casual%20blue%20jeans"
 ```
 
-**Query with Custom Result Count:**
+**With Pagination:**
+
+```bash
+curl "http://localhost:8000/recommend?q=casual%20blue%20jeans&page=2&limit=10"
+```
+
+**Backward Compatible (using top_k):**
 
 ```bash
 curl "http://localhost:8000/recommend?q=formal%20business%20shirt&top_k=20"
@@ -337,33 +354,13 @@ curl "http://localhost:8000/recommend?q=ethnic%20dress%20for%20party%20red%20col
       "usage": "Casual",
       "score": 0.8401234,
       "image_url": "/images/39403.jpg"
-    },
-    {
-      "id": 12347,
-      "product": "United Colors of Benetton Men Blue Jeans",
-      "color": "Blue",
-      "usage": "Casual",
-      "score": 0.8256789,
-      "image_url": "/images/12347.jpg"
-    },
-    {
-      "id": 28232,
-      "product": "Lee Men Blue Jeans",
-      "color": "Blue",
-      "usage": "Casual",
-      "score": 0.8134567,
-      "image_url": "/images/28232.jpg"
-    },
-    {
-      "id": 44551,
-      "product": "Flying Machine Men Blue Jeans",
-      "color": "Blue",
-      "usage": "Casual",
-      "score": 0.8023456,
-      "image_url": "/images/44551.jpg"
     }
   ],
-  "total_results": 5
+  "total_results": 2,
+  "page": 1,
+  "limit": 12,
+  "total_matching": 5420,
+  "total_pages": 452
 }
 ```
 
@@ -765,5 +762,24 @@ For issues or questions:
 
 ---
 
-**Last Updated:** December 18, 2025  
-**API Version:** 1.0.0
+## Changelog
+
+### v1.1.0 (January 20, 2026)
+
+**New Features:**
+- Added pagination support to `/recommend` endpoint
+  - New `page` parameter (1-indexed, default: 1)
+  - New `limit` parameter (items per page, default: 12, max: 50)
+  - Response now includes `page`, `limit`, `total_matching`, and `total_pages` fields
+
+**Deprecations:**
+- `top_k` parameter is deprecated in favor of `limit` (still works for backward compatibility)
+
+**Bug Fixes:**
+- Fixed potential 500 error when image IDs contain NaN or float values
+- Added defensive handling for malformed product IDs
+
+---
+
+**Last Updated:** January 20, 2026  
+**API Version:** 1.1.0
