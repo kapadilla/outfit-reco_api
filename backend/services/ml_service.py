@@ -61,10 +61,12 @@ class MLService:
             logger.info("Loading image embeddings...")
             self.image_embeddings = np.load(settings.IMAGE_EMBEDDINGS_PATH)
 
-            # Load image IDs
+            # Load image IDs (ensure they are integers, drop any NaN values)
             logger.info("Loading image IDs...")
             image_ids_df = pd.read_csv(settings.IMAGE_IDS_PATH)
-            self.image_ids = image_ids_df["id"].tolist()
+            # Drop NaN values and convert to int to prevent float issues
+            image_ids_series = image_ids_df["id"].dropna().astype(int)
+            self.image_ids = image_ids_series.tolist()
 
             # Load styles metadata
             logger.info("Loading product metadata...")

@@ -7,7 +7,8 @@ A Style & Occasion-Based Outfit Recommendation System using CLIP embeddings and 
 This API provides intelligent fashion recommendations based on natural language queries. It combines:
 
 - **CLIP (ViT-B/32)** for visual and text embedding
-- **Logistic Regression** for usage category classification
+- **Logistic Regression** with class balancing for usage category classification
+- **SMOTE + Class Weights** for handling imbalanced data
 - **Cosine Similarity** for semantic matching and ranking
 
 Based on the [Fashion Product Images Dataset](https://www.kaggle.com/datasets/paramaggarwal/fashion-product-images-dataset) from Kaggle.
@@ -15,7 +16,8 @@ Based on the [Fashion Product Images Dataset](https://www.kaggle.com/datasets/pa
 ## Features
 
 - 🔍 Natural language search for outfit recommendations
-- 🎯 Automatic usage category prediction (Casual, Formal, Sports, etc.)
+- 🎯 Automatic usage category prediction (Casual, Formal, Sports, Ethnic, etc.)
+- ⚖️ Balanced predictions across all categories (not biased toward Casual)
 - 📊 Ranked results by visual similarity
 - 🖼️ Product metadata and image serving
 - 📚 Interactive API documentation
@@ -40,10 +42,12 @@ outfit-reco_api/
 │   ├── image_embeddings.npy
 │   └── image_ids.csv
 ├── scripts/
-│   └── download_dataset.py  # Kaggle dataset downloader
+│   ├── download_dataset.py  # Kaggle dataset downloader
+│   └── train_models.py      # Model training with class balancing
 ├── .env                 # Environment variables (not in git)
 └── .env.example        # Environment template
 ```
+
 
 ## Setup Instructions
 
@@ -92,16 +96,26 @@ This will:
 
 ### 6. Run the API
 
+**Important**: You must run the server from the `backend/` directory.
+
 ```bash
 cd backend
-uvicorn api:app --reload
+python -m uvicorn api:app --reload
+```
+
+Or start with explicit host/port:
+
+```bash
+cd backend
+python -m uvicorn api:app --host 127.0.0.1 --port 8000
 ```
 
 The API will be available at:
 
-- **API**: http://localhost:8000
-- **Interactive Docs**: http://localhost:8000/docs
-- **Alternative Docs**: http://localhost:8000/redoc
+- **API**: http://127.0.0.1:8000
+- **Interactive Docs**: http://127.0.0.1:8000/docs
+- **Alternative Docs**: http://127.0.0.1:8000/redoc
+
 
 ## API Endpoints
 
@@ -239,9 +253,28 @@ The Fashion Product Images Dataset contains:
 - **CLIP**: OpenAI's vision-language model
 - **PyTorch**: Deep learning framework
 - **Scikit-learn**: Machine learning library
+- **imbalanced-learn**: SMOTE oversampling for class balancing
 - **Pandas**: Data manipulation
 - **Pydantic**: Data validation
 - **Uvicorn**: ASGI server
+
+## Retraining the Model
+
+To retrain the model with class balancing:
+
+```bash
+# Full dataset (takes ~3 hours on CPU)
+python scripts/train_models.py
+
+# Quick test with 1000 samples
+python scripts/train_models.py --sample-size 1000
+
+# Without SMOTE (class weights only)
+python scripts/train_models.py --no-smote
+```
+
+After retraining, restart the API server to load the new model.
+
 
 ## Troubleshooting
 

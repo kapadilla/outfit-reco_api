@@ -46,12 +46,18 @@ class RecommendationRequest(BaseModel):
 
 
 class RecommendationResponse(BaseModel):
-    """Schema for recommendation response."""
+    """Schema for recommendation response with pagination support."""
 
     query: str = Field(..., description="Original search query")
     predicted_usage: Optional[str] = Field(None, description="Predicted usage category")
     results: List[ProductItem] = Field(..., description="List of recommended products")
-    total_results: int = Field(..., description="Total number of results returned")
+    total_results: int = Field(..., description="Number of results in current page")
+    
+    # Pagination fields
+    page: int = Field(default=1, description="Current page number")
+    limit: int = Field(default=12, description="Items per page")
+    total_matching: int = Field(default=0, description="Total matching products before pagination")
+    total_pages: int = Field(default=1, description="Total number of pages")
 
     class Config:
         json_schema_extra = {
@@ -65,9 +71,14 @@ class RecommendationResponse(BaseModel):
                         "color": "Blue",
                         "usage": "Casual",
                         "score": 0.85,
+                        "image_url": "/images/12345.jpg",
                     }
                 ],
                 "total_results": 12,
+                "page": 1,
+                "limit": 12,
+                "total_matching": 150,
+                "total_pages": 13,
             }
         }
 
