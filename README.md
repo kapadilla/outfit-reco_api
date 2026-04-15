@@ -2,6 +2,9 @@
 
 A Style & Occasion-Based Outfit Recommendation System using CLIP embeddings and machine learning classification for personalized fashion suggestions.
 
+### Frontend Application
+The frontend for this API can be found at [outfit-reco](https://github.com/kapadilla/outfit-reco).
+
 ## Project Overview
 
 This API provides intelligent fashion recommendations based on natural language queries. It combines:
